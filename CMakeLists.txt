@@ -55,7 +55,7 @@ set_target_properties(model_loading PROPERTIES
 target_link_libraries(model_loading PRIVATE STB_IMAGE)
 
 if(SS_GL_USE_ES)
-    target_compile_definitions(model_loading PRIVATE SS_GL_USE_ES=1)
+    target_compile_definitions(model_loading PRIVATE SS_GL_USE_ES=1 GLFW_INCLUDE_NONE)
     target_include_directories(model_loading BEFORE PRIVATE
         ${CMAKE_SOURCE_DIR}/includes/glad_es
         ${CMAKE_SOURCE_DIR}/includes
@@ -63,6 +63,7 @@ if(SS_GL_USE_ES)
     )
     target_link_libraries(model_loading PRIVATE GLAD_ES)
 else()
+    target_compile_definitions(model_loading PRIVATE GLFW_INCLUDE_NONE)
     target_include_directories(model_loading PRIVATE
         ${CMAKE_SOURCE_DIR}/includes
         ${CMAKE_BINARY_DIR}/configuration

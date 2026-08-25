@@ -1,6 +1,11 @@
 #ifndef __glad_h_
 #define __glad_h_
 
+/* Prevent desktop GL/gl.h from being pulled in after our gl* macros. */
+#ifndef __gl_h_
+#define __gl_h_
+#endif
+
 #include <GLES3/gl3.h>
 
 #ifdef __cplusplus

@@ -49,6 +49,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <sys/types.h>
 #include <math.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 #include <limits.h>
 
@@ -359,7 +360,14 @@ struct aiString
     /** Binary length of the string excluding the terminal 0. This is NOT the
      *  logical length of strings containing UTF-8 multibyte sequences! It's
      *  the number of bytes from the beginning of the string to its end.*/
+    /* Assimp 5+ uses uint32_t; older LearnOpenGL-bundled headers used size_t.
+     * Mixing size_t headers with system libassimp5 on 64-bit Linux truncates
+     * texture paths by 4 bytes (e.g. LOW_WEPON_... -> WEPON_...). */
+#if defined(__linux__) || defined(__ANDROID__)
+    uint32_t length;
+#else
     size_t length;
+#endif
 
     /** String buffer. Size limit is MAXLEN */
     char data[MAXLEN];

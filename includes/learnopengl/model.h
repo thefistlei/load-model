@@ -20,7 +20,9 @@
 #include <iostream>
 #include <map>
 #include <vector>
+#include <filesystem>
 using namespace std;
+namespace fs = std::filesystem;
 
 unsigned int TextureFromFile(const char *path, const string &directory, bool gamma = false);
 
@@ -258,6 +260,38 @@ unsigned int TextureFromFile(const char *path, const string &directory, bool gam
         addCandidate(dir + "/" + baseName(raw));
     addCandidate(raw);
     addCandidate(baseName(raw));
+
+    // If Assimp ABI still truncates the name (e.g. LOW_WEPON -> WEPON), find a
+    // file in the model directory whose name ends with the (possibly truncated) name.
+    // Also try common alternate extensions (.ktx2 / .png / .jpg).
+    auto addSuffixMatchesInDir = [&](const string& needle) {
+        if (dir.empty() || needle.empty() || !fs::is_directory(dir))
+            return;
+        std::error_code ec;
+        for (const auto& ent : fs::directory_iterator(dir, ec))
+        {
+            if (ec || !ent.is_regular_file())
+                continue;
+            const string name = ent.path().filename().string();
+            if (name.size() >= needle.size() &&
+                name.compare(name.size() - needle.size(), needle.size(), needle) == 0)
+            {
+                addCandidate(ent.path().string());
+            }
+        }
+    };
+
+    const string needle = baseName(raw);
+    addSuffixMatchesInDir(needle);
+    // Prefer compressed sibling if mtl points at png but only ktx2 exists (and vice versa)
+    const char* altExts[] = { ".ktx2", ".png", ".jpg", ".jpeg", ".tga", ".ktx" };
+    const size_t dot = needle.find_last_of('.');
+    if (dot != string::npos)
+    {
+        const string stem = needle.substr(0, dot);
+        for (const char* ext : altExts)
+            addSuffixMatchesInDir(stem + ext);
+    }
 
     string filename;
     for (const auto& c : candidates)

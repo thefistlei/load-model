@@ -20,8 +20,10 @@ extern PFNGLVIEWPORTPROC glad_glViewport;
 extern PFNGLGENTEXTURESPROC glad_glGenTextures;
 extern PFNGLBINDTEXTUREPROC glad_glBindTexture;
 extern PFNGLTEXIMAGE2DPROC glad_glTexImage2D;
+extern PFNGLCOMPRESSEDTEXIMAGE2DPROC glad_glCompressedTexImage2D;
 extern PFNGLGENERATEMIPMAPPROC glad_glGenerateMipmap;
 extern PFNGLTEXPARAMETERIPROC glad_glTexParameteri;
+extern PFNGLPIXELSTOREIPROC glad_glPixelStorei;
 extern PFNGLACTIVETEXTUREPROC glad_glActiveTexture;
 extern PFNGLUNIFORM1IPROC glad_glUniform1i;
 extern PFNGLGETUNIFORMLOCATIONPROC glad_glGetUniformLocation;
@@ -58,8 +60,10 @@ int gladLoadGLLoader(GLADloadproc load);
 #define glGenTextures glad_glGenTextures
 #define glBindTexture glad_glBindTexture
 #define glTexImage2D glad_glTexImage2D
+#define glCompressedTexImage2D glad_glCompressedTexImage2D
 #define glGenerateMipmap glad_glGenerateMipmap
 #define glTexParameteri glad_glTexParameteri
+#define glPixelStorei glad_glPixelStorei
 #define glActiveTexture glad_glActiveTexture
 #define glUniform1i glad_glUniform1i
 #define glGetUniformLocation glad_glGetUniformLocation

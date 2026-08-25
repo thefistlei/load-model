@@ -242,6 +242,9 @@ bool uploadKtx2ToTexture(unsigned int texture, const Ktx2Texture& ktx)
     if (!ktx.valid || ktx.levels.empty())
         return false;
 
+    // Drain previous errors so we can detect upload failures.
+    while (glGetError() != GL_NO_ERROR) {}
+
     glBindTexture(GL_TEXTURE_2D, texture);
     for (size_t level = 0; level < ktx.levels.size(); ++level)
     {
@@ -255,11 +258,25 @@ bool uploadKtx2ToTexture(unsigned int texture, const Ktx2Texture& ktx)
             0,
             static_cast<GLsizei>(mip.data.size()),
             mip.data.data());
+
+        const GLenum err = glGetError();
+        if (err != GL_NO_ERROR)
+        {
+            std::cout << "glCompressedTexImage2D failed level=" << level
+                      << " format=0x" << std::hex << ktx.internalFormat << std::dec
+                      << " size=" << mip.width << "x" << mip.height
+                      << " err=0x" << std::hex << err << std::dec
+                      << " (GPU may lack ASTC support)" << std::endl;
+            return false;
+        }
     }
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    if (ktx.levels.size() > 1)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    else
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     return true;
 }

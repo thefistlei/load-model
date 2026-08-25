@@ -62,6 +62,13 @@ private:
         // retrieve the directory path of the filepath
         const size_t lastSlash = path.find_last_of("/\\");
         directory = (lastSlash != string::npos) ? path.substr(0, lastSlash) : "";
+        for (char& c : directory)
+        {
+            if (c == '\\')
+                c = '/';
+        }
+        std::cout << "Model loaded from: " << path << std::endl;
+        std::cout << "Model texture directory: " << directory << std::endl;
 
         // process ASSIMP's root node recursively
         processNode(scene->mRootNode, scene);
@@ -207,62 +214,186 @@ private:
 
 unsigned int TextureFromFile(const char *path, const string &directory, bool gamma)
 {
-    string filename = string(path);
-    filename = directory + '/' + filename;
+    auto normalizePath = [](string p) {
+        for (char& c : p)
+        {
+            if (c == '\\')
+                c = '/';
+        }
+        return p;
+    };
+    auto baseName = [](const string& p) {
+        const size_t pos = p.find_last_of('/');
+        return (pos == string::npos) ? p : p.substr(pos + 1);
+    };
+    auto fileReadable = [](const string& p) {
+        std::ifstream f(p.c_str(), std::ios::binary);
+        return f.good();
+    };
 
-    unsigned int textureID;
+    string raw = normalizePath(path ? path : "");
+    // Assimp/FBX often embeds Windows absolute paths (C:/... or //server/...)
+    if (raw.size() >= 2 && ((raw[0] >= 'A' && raw[0] <= 'Z') || (raw[0] >= 'a' && raw[0] <= 'z')) && raw[1] == ':')
+        raw = baseName(raw);
+    while (raw.size() >= 2 && raw[0] == '/' && raw[1] == '/')
+        raw = raw.substr(1);
+
+    string dir = normalizePath(directory);
+    vector<string> candidates;
+    auto addCandidate = [&](const string& p) {
+        if (p.empty())
+            return;
+        for (const auto& existing : candidates)
+        {
+            if (existing == p)
+                return;
+        }
+        candidates.push_back(p);
+    };
+
+    const bool rawIsAbs = !raw.empty() && raw[0] == '/';
+    if (!dir.empty() && !rawIsAbs)
+        addCandidate(dir + "/" + raw);
+    if (!dir.empty())
+        addCandidate(dir + "/" + baseName(raw));
+    addCandidate(raw);
+    addCandidate(baseName(raw));
+
+    string filename;
+    for (const auto& c : candidates)
+    {
+        if (fileReadable(c))
+        {
+            filename = c;
+            break;
+        }
+    }
+    if (filename.empty())
+        filename = candidates.empty() ? raw : candidates.front();
+
+    unsigned int textureID = 0;
     glGenTextures(1, &textureID);
 
-    if (isKtx2File(filename))
-    {
-        Ktx2Texture ktx;
-        if (loadKtx2FromFile(filename, ktx)) {
-            std::cout << "loadKtx2FromFile suc " << path << std::endl;
-            if (uploadKtx2ToTexture(textureID, ktx)) {
-                std::cout << "Texture load KTX2 at path: " << path << std::endl;
-                return textureID;
-            }
-        }
-        else {
-            std::cout << "loadKtx2FromFile fail " << path << std::endl;
-        }
+    auto uploadRaster = [&](unsigned char* data, int width, int height, int nrComponents) -> bool {
+        if (!data)
+            return false;
 
-        std::cout << "Texture failed to load KTX2 at path: " << path << std::endl;
-        return textureID;
-    }
-    else {
-        std::cout << "no KTX2 " << path << std::endl;
-    }
-
-    int width, height, nrComponents;
-    unsigned char *data = stbi_load(filename.c_str(), &width, &height, &nrComponents, 0);
-    if (data)
-    {
-        GLenum format;
+        GLenum format = GL_RGB;
+        GLenum internalFormat = GL_RGB;
         if (nrComponents == 1)
+        {
             format = GL_RED;
+            internalFormat = GL_RED;
+        }
         else if (nrComponents == 3)
+        {
             format = GL_RGB;
+            internalFormat = GL_RGB;
+        }
         else if (nrComponents == 4)
+        {
             format = GL_RGBA;
+            internalFormat = GL_RGBA;
+        }
+        else
+        {
+            std::cout << "Texture unsupported channel count " << nrComponents << " at " << filename << std::endl;
+            return false;
+        }
+
+#if defined(SS_GL_USE_ES) && SS_GL_USE_ES
+        if (nrComponents == 1)
+            internalFormat = GL_R8;
+        else if (nrComponents == 3)
+            internalFormat = GL_RGB8;
+        else if (nrComponents == 4)
+            internalFormat = GL_RGBA8;
+#endif
+
+        while (glGetError() != GL_NO_ERROR) {}
 
         glBindTexture(GL_TEXTURE_2D, textureID);
-        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
-        glGenerateMipmap(GL_TEXTURE_2D);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glTexImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(internalFormat), width, height, 0, format, GL_UNSIGNED_BYTE, data);
+        const GLenum err = glGetError();
+        if (err != GL_NO_ERROR)
+        {
+            std::cout << "glTexImage2D failed for " << filename
+                      << " err=0x" << std::hex << err << std::dec
+                      << " size=" << width << "x" << height
+                      << " channels=" << nrComponents << std::endl;
+            return false;
+        }
 
+        glGenerateMipmap(GL_TEXTURE_2D);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        return true;
+    };
 
-        stbi_image_free(data);
-    }
-    else
+    if (isKtx2File(filename))
     {
-        std::cout << "Texture failed to load at path: " << path << std::endl;
-        stbi_image_free(data);
+        Ktx2Texture ktx;
+        if (loadKtx2FromFile(filename, ktx))
+        {
+            if (uploadKtx2ToTexture(textureID, ktx))
+            {
+                std::cout << "Texture loaded KTX2: " << filename << std::endl;
+                return textureID;
+            }
+            std::cout << "uploadKtx2ToTexture fail: " << filename << std::endl;
+        }
+        else
+        {
+            std::cout << "loadKtx2FromFile fail: " << filename << std::endl;
+        }
+
+        // Fallback: same basename with common raster extensions
+        const string stem = filename.substr(0, filename.size() - 5); // strip .ktx2
+        const char* exts[] = { ".png", ".jpg", ".jpeg", ".tga", ".bmp" };
+        for (const char* ext : exts)
+        {
+            const string alt = stem + ext;
+            if (!fileReadable(alt))
+                continue;
+            int width = 0, height = 0, nrComponents = 0;
+            unsigned char* data = stbi_load(alt.c_str(), &width, &height, &nrComponents, 0);
+            if (data && uploadRaster(data, width, height, nrComponents))
+            {
+                stbi_image_free(data);
+                std::cout << "Texture loaded fallback raster: " << alt << std::endl;
+                return textureID;
+            }
+            if (data)
+                stbi_image_free(data);
+        }
+
+        std::cout << "Texture failed to load KTX2: " << filename
+                  << " (modelDir=" << dir << ", assimpPath=" << (path ? path : "") << ")" << std::endl;
+        return textureID;
     }
 
+    int width = 0, height = 0, nrComponents = 0;
+    unsigned char* data = stbi_load(filename.c_str(), &width, &height, &nrComponents, 0);
+    if (data && uploadRaster(data, width, height, nrComponents))
+    {
+        stbi_image_free(data);
+        std::cout << "Texture loaded: " << filename << std::endl;
+        return textureID;
+    }
+
+    std::cout << "Texture failed to load: " << filename
+              << " reason: " << (stbi_failure_reason() ? stbi_failure_reason() : "unknown")
+              << " (modelDir=" << dir << ", assimpPath=" << (path ? path : "") << ")"
+              << " tried:";
+    for (const auto& c : candidates)
+        std::cout << " [" << c << "]";
+    std::cout << std::endl;
+
+    if (data)
+        stbi_image_free(data);
     return textureID;
 }
 #endif

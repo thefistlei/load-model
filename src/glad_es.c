@@ -7,8 +7,10 @@ PFNGLVIEWPORTPROC glad_glViewport = NULL;
 PFNGLGENTEXTURESPROC glad_glGenTextures = NULL;
 PFNGLBINDTEXTUREPROC glad_glBindTexture = NULL;
 PFNGLTEXIMAGE2DPROC glad_glTexImage2D = NULL;
+PFNGLCOMPRESSEDTEXIMAGE2DPROC glad_glCompressedTexImage2D = NULL;
 PFNGLGENERATEMIPMAPPROC glad_glGenerateMipmap = NULL;
 PFNGLTEXPARAMETERIPROC glad_glTexParameteri = NULL;
+PFNGLPIXELSTOREIPROC glad_glPixelStorei = NULL;
 PFNGLACTIVETEXTUREPROC glad_glActiveTexture = NULL;
 PFNGLUNIFORM1IPROC glad_glUniform1i = NULL;
 PFNGLGETUNIFORMLOCATIONPROC glad_glGetUniformLocation = NULL;
@@ -45,8 +47,10 @@ static void load_gl_functions(GLADloadproc load)
     glad_glGenTextures = (PFNGLGENTEXTURESPROC)load("glGenTextures");
     glad_glBindTexture = (PFNGLBINDTEXTUREPROC)load("glBindTexture");
     glad_glTexImage2D = (PFNGLTEXIMAGE2DPROC)load("glTexImage2D");
+    glad_glCompressedTexImage2D = (PFNGLCOMPRESSEDTEXIMAGE2DPROC)load("glCompressedTexImage2D");
     glad_glGenerateMipmap = (PFNGLGENERATEMIPMAPPROC)load("glGenerateMipmap");
     glad_glTexParameteri = (PFNGLTEXPARAMETERIPROC)load("glTexParameteri");
+    glad_glPixelStorei = (PFNGLPIXELSTOREIPROC)load("glPixelStorei");
     glad_glActiveTexture = (PFNGLACTIVETEXTUREPROC)load("glActiveTexture");
     glad_glUniform1i = (PFNGLUNIFORM1IPROC)load("glUniform1i");
     glad_glGetUniformLocation = (PFNGLGETUNIFORMLOCATIONPROC)load("glGetUniformLocation");
@@ -82,5 +86,12 @@ int gladLoadGLLoader(GLADloadproc load)
 {
     GLAD_GL_VERSION_3_0 = 1;
     load_gl_functions(load);
-    return glad_glViewport && glad_glCreateProgram && glad_glGenVertexArrays;
+    return glad_glViewport
+        && glad_glCreateProgram
+        && glad_glGenVertexArrays
+        && glad_glGenTextures
+        && glad_glBindTexture
+        && glad_glTexImage2D
+        && glad_glTexParameteri
+        && glad_glPixelStorei;
 }

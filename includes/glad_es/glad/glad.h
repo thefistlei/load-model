@@ -9,8 +9,6 @@ extern "C" {
 
 typedef void* (*GLADloadproc)(const char *name);
 
-#define GLAD_GL_VERSION_3_0 1
-
 extern int GLAD_GL_VERSION_3_0;
 
 extern PFNGLVIEWPORTPROC glad_glViewport;

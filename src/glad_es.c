@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <glad/glad.h>
 
 int GLAD_GL_VERSION_3_0 = 0;

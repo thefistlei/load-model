@@ -27,7 +27,7 @@ if(WIN32)
 endif()
 
 configure_file(
-    configuration/root_directory.h.in
+    ${CMAKE_SOURCE_DIR}/configuration/root_directory.h.in
     ${CMAKE_BINARY_DIR}/configuration/root_directory.h
 )
 

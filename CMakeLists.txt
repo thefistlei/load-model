@@ -54,22 +54,26 @@ set_target_properties(model_loading PROPERTIES
 
 target_link_libraries(model_loading PRIVATE STB_IMAGE)
 
+# Include order matters:
+# - glad_es must beat includes/glad
+# - on Linux, system Assimp headers must beat bundled includes/assimp
+#   (Assimp 5 uses uint32_t aiString::length; bundled LearnOpenGL headers use
+#   size_t — on 64-bit that truncates texture paths by 4 chars, e.g. diffuse.jpg -> use.jpg)
 if(SS_GL_USE_ES)
     target_compile_definitions(model_loading PRIVATE SS_GL_USE_ES=1 GLFW_INCLUDE_NONE)
     target_include_directories(model_loading BEFORE PRIVATE
         ${CMAKE_SOURCE_DIR}/includes/glad_es
-        ${CMAKE_SOURCE_DIR}/includes
-        ${CMAKE_BINARY_DIR}/configuration
     )
     target_link_libraries(model_loading PRIVATE GLAD_ES)
 else()
     target_compile_definitions(model_loading PRIVATE GLFW_INCLUDE_NONE)
-    target_include_directories(model_loading PRIVATE
-        ${CMAKE_SOURCE_DIR}/includes
-        ${CMAKE_BINARY_DIR}/configuration
-    )
     target_link_libraries(model_loading PRIVATE GLAD)
 endif()
+
+target_include_directories(model_loading PRIVATE
+    ${CMAKE_SOURCE_DIR}/includes
+    ${CMAKE_BINARY_DIR}/configuration
+)
 
 if(WIN32)
     find_package(GLFW3 REQUIRED)
@@ -102,6 +106,22 @@ elseif(UNIX AND NOT APPLE)
     endif()
 
     find_package(ASSIMP REQUIRED)
+    if(NOT ASSIMP_INCLUDE_DIR)
+        message(FATAL_ERROR "ASSIMP_INCLUDE_DIR not set")
+    endif()
+    # Prefer system Assimp headers over bundled includes/assimp (ABI must match libassimp).
+    get_filename_component(_assimp_inc_abs "${ASSIMP_INCLUDE_DIR}" ABSOLUTE)
+    get_filename_component(_bundled_inc_abs "${CMAKE_SOURCE_DIR}/includes" ABSOLUTE)
+    if(_assimp_inc_abs STREQUAL _bundled_inc_abs)
+        message(FATAL_ERROR
+            "Assimp headers resolved to bundled LearnOpenGL includes/assimp, which do not match "
+            "system libassimp (aiString::length size_t vs uint32_t). Install matching headers:\n"
+            "  sudo apt-get install -y libassimp-dev\n"
+            "Then wipe build/ and reconfigure.")
+    endif()
+    target_include_directories(model_loading BEFORE PRIVATE ${ASSIMP_INCLUDE_DIR})
+    message(STATUS "Assimp library: ${ASSIMP_LIBRARY}")
+    message(STATUS "Assimp include: ${ASSIMP_INCLUDE_DIR}")
     target_link_libraries(model_loading PRIVATE ${ASSIMP_LIBRARIES})
 elseif(APPLE)
     find_package(GLFW3 REQUIRED)

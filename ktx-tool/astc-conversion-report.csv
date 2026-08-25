@@ -1,0 +1,6 @@
+texture,status,block_dim,colorspace,layout,source_bytes,ktx2_bytes,ratio
+backpack\ao.jpg,planned,8x8,linear,astc_8x8,1895126,,
+backpack\diffuse.jpg,planned,6x6,sRGB,astc_6x6_sRGB,6108855,,
+backpack\normal.png,planned,6x6,linear,astc_6x6,15214871,,
+backpack\roughness.jpg,planned,8x8,linear,astc_8x8,4388250,,
+backpack\specular.jpg,planned,8x8,linear,astc_8x8,5417895,,

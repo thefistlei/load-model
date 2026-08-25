@@ -8,30 +8,23 @@
 
 namespace
 {
-#ifndef GL_COMPRESSED_RGBA_ASTC_4x4_KHR
+// GL_KHR_texture_compression_astc_ldr / GLES 3.2 core ASTC enums
+#undef GL_COMPRESSED_RGBA_ASTC_4x4_KHR
+#undef GL_COMPRESSED_RGBA_ASTC_5x5_KHR
+#undef GL_COMPRESSED_RGBA_ASTC_6x6_KHR
+#undef GL_COMPRESSED_RGBA_ASTC_8x8_KHR
+#undef GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR
+#undef GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x5_KHR
+#undef GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x6_KHR
+#undef GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x8_KHR
 #define GL_COMPRESSED_RGBA_ASTC_4x4_KHR 0x93B0
-#endif
-#ifndef GL_COMPRESSED_RGBA_ASTC_5x5_KHR
 #define GL_COMPRESSED_RGBA_ASTC_5x5_KHR 0x93B2
-#endif
-#ifndef GL_COMPRESSED_RGBA_ASTC_6x6_KHR
-#define GL_COMPRESSED_RGBA_ASTC_6x6_KHR 0x93BD
-#endif
-#ifndef GL_COMPRESSED_RGBA_ASTC_8x8_KHR
-#define GL_COMPRESSED_RGBA_ASTC_8x8_KHR 0x93C1
-#endif
-#ifndef GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR
+#define GL_COMPRESSED_RGBA_ASTC_6x6_KHR 0x93B4
+#define GL_COMPRESSED_RGBA_ASTC_8x8_KHR 0x93B7
 #define GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR 0x93D0
-#endif
-#ifndef GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x5_KHR
-#define GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x5_KHR 0x93D1
-#endif
-#ifndef GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x6_KHR
-#define GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x6_KHR 0x93D2
-#endif
-#ifndef GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x8_KHR
-#define GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x8_KHR 0x93D6
-#endif
+#define GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x5_KHR 0x93D2
+#define GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x6_KHR 0x93D4
+#define GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x8_KHR 0x93D7
 
 struct KTX2_Header
 {
@@ -265,8 +258,8 @@ bool uploadKtx2ToTexture(unsigned int texture, const Ktx2Texture& ktx)
             std::cout << "glCompressedTexImage2D failed level=" << level
                       << " format=0x" << std::hex << ktx.internalFormat << std::dec
                       << " size=" << mip.width << "x" << mip.height
-                      << " err=0x" << std::hex << err << std::dec
-                      << " (GPU may lack ASTC support)" << std::endl;
+                      << " bytes=" << mip.data.size()
+                      << " err=0x" << std::hex << err << std::dec << std::endl;
             return false;
         }
     }

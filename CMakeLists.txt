@@ -45,6 +45,7 @@ endif()
 
 add_executable(model_loading
     src/model_loading.cpp
+    src/scene_config.cpp
     src/ktx2_image_provider.cpp
 )
 
@@ -123,10 +124,6 @@ elseif(UNIX AND NOT APPLE)
     message(STATUS "Assimp library: ${ASSIMP_LIBRARY}")
     message(STATUS "Assimp include: ${ASSIMP_INCLUDE_DIR}")
     target_link_libraries(model_loading PRIVATE ${ASSIMP_LIBRARIES})
-    # std::filesystem on GCC < 9
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
-        target_link_libraries(model_loading PRIVATE stdc++fs)
-    endif()
 elseif(APPLE)
     find_package(GLFW3 REQUIRED)
     find_package(ASSIMP REQUIRED)
@@ -143,6 +140,45 @@ elseif(APPLE)
         ${OpenGL_LIBRARY}
         ${CoreVideo_LIBRARY}
     )
+endif()
+
+# FBX -> OBJ helper for asset conversion (fy scene)
+if(ASSIMP_FOUND OR WIN32 OR (UNIX AND NOT APPLE) OR APPLE)
+    if(NOT ASSIMP_FOUND)
+        find_package(ASSIMP REQUIRED)
+    endif()
+    add_executable(fbx2obj tools/fbx2obj.cpp)
+    set_target_properties(fbx2obj PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin"
+    )
+    if(ASSIMP_INCLUDE_DIR)
+        target_include_directories(fbx2obj BEFORE PRIVATE ${ASSIMP_INCLUDE_DIR})
+    else()
+        target_include_directories(fbx2obj BEFORE PRIVATE ${CMAKE_SOURCE_DIR}/includes)
+    endif()
+    if(WIN32)
+        target_link_libraries(fbx2obj PRIVATE assimp)
+    else()
+        target_link_libraries(fbx2obj PRIVATE ${ASSIMP_LIBRARIES})
+    endif()
+    if(MSVC)
+        target_compile_options(fbx2obj PRIVATE /std:c++17)
+    endif()
+
+    find_program(PYTHON3_EXECUTABLE NAMES python3 python)
+    if(PYTHON3_EXECUTABLE AND EXISTS "${CMAKE_SOURCE_DIR}/new-resources/fy/mesh")
+        set(FY_CONVERT_STAMP "${CMAKE_BINARY_DIR}/fy_convert.stamp")
+        add_custom_command(
+            OUTPUT "${FY_CONVERT_STAMP}"
+            COMMAND ${PYTHON3_EXECUTABLE} "${CMAKE_SOURCE_DIR}/tools/convert_fy_for_load_model.py"
+            COMMAND ${CMAKE_COMMAND} -E touch "${FY_CONVERT_STAMP}"
+            DEPENDS fbx2obj
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            COMMENT "Converting fy RFS assets to load-model layout"
+        )
+        add_custom_target(convert_fy_assets DEPENDS "${FY_CONVERT_STAMP}")
+        add_dependencies(model_loading convert_fy_assets)
+    endif()
 endif()
 
 if(MSVC)
@@ -167,6 +203,12 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/resources/objects/backpack
             $<TARGET_FILE_DIR:model_loading>/backpack)
+    if(EXISTS "${CMAKE_SOURCE_DIR}/resources/objects/fy/fy.obj")
+        add_custom_command(TARGET model_loading PRE_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${CMAKE_SOURCE_DIR}/resources/objects/fy
+                $<TARGET_FILE_DIR:model_loading>/fy)
+    endif()
 else()
     if(SS_GL_USE_ES)
         set(SHADER_VS ${CMAKE_SOURCE_DIR}/shaders/1.model_loading_es.vs)
@@ -183,6 +225,12 @@ else()
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/resources/objects/backpack
             $<TARGET_FILE_DIR:model_loading>/backpack)
+    if(EXISTS "${CMAKE_SOURCE_DIR}/resources/objects/fy/fy.obj")
+        add_custom_command(TARGET model_loading POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${CMAKE_SOURCE_DIR}/resources/objects/fy
+                $<TARGET_FILE_DIR:model_loading>/fy)
+    endif()
     if(SS_GL_USE_ES)
         add_custom_command(TARGET model_loading POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different

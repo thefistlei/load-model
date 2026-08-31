@@ -20,9 +20,14 @@
 #include <iostream>
 #include <map>
 #include <vector>
-#include <filesystem>
+#include <functional>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <dirent.h>
+#include <sys/stat.h>
+#endif
 using namespace std;
-namespace fs = std::filesystem;
 
 unsigned int TextureFromFile(const char *path, const string &directory, bool gamma = false);
 
@@ -162,18 +167,28 @@ private:
         // specular: texture_specularN
         // normal: texture_normalN
 
-        // 1. diffuse maps
+        // 1. diffuse / baseColor (OBJ uses DIFFUSE; glTF 2 PBR uses BASE_COLOR)
         vector<Texture> diffuseMaps = loadMaterialTextures(material, aiTextureType_DIFFUSE, "texture_diffuse");
         textures.insert(textures.end(), diffuseMaps.begin(), diffuseMaps.end());
+        vector<Texture> baseColorMaps = loadMaterialTextures(material, aiTextureType_BASE_COLOR, "texture_diffuse");
+        textures.insert(textures.end(), baseColorMaps.begin(), baseColorMaps.end());
         // 2. specular maps
         vector<Texture> specularMaps = loadMaterialTextures(material, aiTextureType_SPECULAR, "texture_specular");
         textures.insert(textures.end(), specularMaps.begin(), specularMaps.end());
-        // 3. normal maps
+        // 3. normal maps (OBJ bump often lands in HEIGHT; glTF uses NORMALS / NORMAL_CAMERA)
         std::vector<Texture> normalMaps = loadMaterialTextures(material, aiTextureType_HEIGHT, "texture_normal");
         textures.insert(textures.end(), normalMaps.begin(), normalMaps.end());
-        // 4. height maps
+        std::vector<Texture> normalsMaps = loadMaterialTextures(material, aiTextureType_NORMALS, "texture_normal");
+        textures.insert(textures.end(), normalsMaps.begin(), normalsMaps.end());
+        std::vector<Texture> normalCameraMaps = loadMaterialTextures(material, aiTextureType_NORMAL_CAMERA, "texture_normal");
+        textures.insert(textures.end(), normalCameraMaps.begin(), normalCameraMaps.end());
+        // 4. height / AO
         std::vector<Texture> heightMaps = loadMaterialTextures(material, aiTextureType_AMBIENT, "texture_height");
         textures.insert(textures.end(), heightMaps.begin(), heightMaps.end());
+        std::vector<Texture> aoMaps = loadMaterialTextures(material, aiTextureType_AMBIENT_OCCLUSION, "texture_height");
+        textures.insert(textures.end(), aoMaps.begin(), aoMaps.end());
+        std::vector<Texture> lightMaps = loadMaterialTextures(material, aiTextureType_LIGHTMAP, "texture_height");
+        textures.insert(textures.end(), lightMaps.begin(), lightMaps.end());
 
         // return a mesh object created from the extracted mesh data
         return Mesh(vertices, indices, textures);
@@ -261,28 +276,84 @@ unsigned int TextureFromFile(const char *path, const string &directory, bool gam
     addCandidate(raw);
     addCandidate(baseName(raw));
 
+    auto forEachRegularFile = [](const string& directory, const function<void(const string&)>& visit) {
+#ifdef _WIN32
+        string pattern = directory;
+        if (!pattern.empty() && pattern.back() != '/' && pattern.back() != '\\')
+            pattern += "\\*";
+        else
+            pattern += "*";
+        WIN32_FIND_DATAA data;
+        HANDLE handle = FindFirstFileA(pattern.c_str(), &data);
+        if (handle == INVALID_HANDLE_VALUE)
+            return;
+        do
+        {
+            if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                continue;
+            visit(data.cFileName);
+        } while (FindNextFileA(handle, &data));
+        FindClose(handle);
+#else
+        DIR* dirp = opendir(directory.c_str());
+        if (!dirp)
+            return;
+        while (dirent* entry = readdir(dirp))
+        {
+            if (entry->d_name[0] == '.')
+                continue;
+            const string fullPath = directory + "/" + entry->d_name;
+            struct stat st;
+            if (stat(fullPath.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
+                continue;
+            visit(entry->d_name);
+        }
+        closedir(dirp);
+#endif
+    };
+
     // If Assimp ABI still truncates the name (e.g. LOW_WEPON -> WEPON), find a
     // file in the model directory whose name ends with the (possibly truncated) name.
-    // Also try common alternate extensions (.ktx2 / .png / .jpg).
     auto addSuffixMatchesInDir = [&](const string& needle) {
-        if (dir.empty() || needle.empty() || !fs::is_directory(dir))
+        if (dir.empty() || needle.empty())
             return;
-        std::error_code ec;
-        for (const auto& ent : fs::directory_iterator(dir, ec))
-        {
-            if (ec || !ent.is_regular_file())
-                continue;
-            const string name = ent.path().filename().string();
+        forEachRegularFile(dir, [&](const string& name) {
             if (name.size() >= needle.size() &&
                 name.compare(name.size() - needle.size(), needle.size(), needle) == 0)
             {
-                addCandidate(ent.path().string());
+                addCandidate(dir + "/" + name);
             }
-        }
+        });
     };
 
     const string needle = baseName(raw);
     addSuffixMatchesInDir(needle);
+    // MTL often names textures without a folder; assets commonly live under textures/
+    if (!dir.empty())
+    {
+        const string texDir = dir + "/textures";
+        auto addSuffixMatchesInTexDir = [&](const string& n) {
+            if (n.empty())
+                return;
+            forEachRegularFile(texDir, [&](const string& name) {
+                if (name.size() >= n.size() &&
+                    name.compare(name.size() - n.size(), n.size(), n) == 0)
+                {
+                    addCandidate(texDir + "/" + name);
+                }
+            });
+        };
+        addCandidate(texDir + "/" + needle);
+        addSuffixMatchesInTexDir(needle);
+        const char* altExtsTex[] = { ".ktx2", ".png", ".jpg", ".jpeg", ".tga", ".ktx" };
+        const size_t dotTex = needle.find_last_of('.');
+        if (dotTex != string::npos)
+        {
+            const string stem = needle.substr(0, dotTex);
+            for (const char* ext : altExtsTex)
+                addSuffixMatchesInTexDir(stem + ext);
+        }
+    }
     // Prefer compressed sibling if mtl points at png but only ktx2 exists (and vice versa)
     const char* altExts[] = { ".ktx2", ".png", ".jpg", ".jpeg", ".tga", ".ktx" };
     const size_t dot = needle.find_last_of('.');

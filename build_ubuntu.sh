@@ -14,6 +14,7 @@ sudo apt-get install -y \
     pkg-config \
     libglfw3-dev \
     libassimp-dev \
+    assimp-utils \
     libgl1-mesa-dev \
     libgles2-mesa-dev \
     libegl1-mesa-dev

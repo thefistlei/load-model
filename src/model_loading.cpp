@@ -9,11 +9,14 @@
 #include <learnopengl/shader_m.h>
 #include <learnopengl/camera.h>
 #include <learnopengl/model.h>
+#include <learnopengl/scene_config.h>
 
 #include <iostream>
 #include <cstdio>
 #include <string>
 #include <fstream>
+#include <memory>
+#include <vector>
 
 #ifndef SS_GL_USE_ES
 #define SS_GL_USE_ES 0
@@ -24,6 +27,7 @@
 #else
 #include <unistd.h>
 #include <climits>
+#include <sys/stat.h>
 #endif
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
@@ -65,6 +69,86 @@ bool fileExists(const std::string& path)
 {
     std::ifstream file(path.c_str());
     return file.good();
+}
+
+bool isDirectory(const std::string& path)
+{
+#ifdef _WIN32
+    DWORD attr = GetFileAttributesA(path.c_str());
+    return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY);
+#else
+    struct stat st {};
+    return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+#endif
+}
+
+std::string basenameOf(const std::string& path)
+{
+    const size_t pos = path.find_last_of("/\\");
+    return (pos == std::string::npos) ? path : path.substr(pos + 1);
+}
+
+// Resolve model path: if arg is a directory, look for scene.json, then fallback to .obj/.fbx
+std::string resolveModelPath(const std::string& arg)
+{
+    const std::string base = joinPath(getExecutableDirectory(), arg);
+    if (!isDirectory(base))
+        return base;
+
+    // Check for scene.json first
+    std::string sceneJson = joinPath(base, "scene.json");
+    if (fileExists(sceneJson))
+        return sceneJson;
+
+    const std::string name = basenameOf(arg);
+    const std::string candidates[] = {
+        joinPath(base, name + ".obj"),
+        joinPath(base, name + ".fbx"),
+        joinPath(base, "fy.obj"),
+    };
+
+    for (const auto& candidate : candidates)
+    {
+        if (fileExists(candidate))
+            return candidate;
+    }
+
+    return base;
+}
+
+// Convert SceneTransform to glm::mat4
+glm::mat4 transformToMat4(const SceneTransform& t)
+{
+    if (t.has_matrix)
+    {
+        // matrix is row-major float[16], glm expects column-major
+        return glm::make_mat4(t.matrix);
+    }
+
+    glm::mat4 model = glm::mat4(1.0f);
+
+    // Apply translation
+    model = glm::translate(model, glm::vec3(t.position[0], t.position[1], t.position[2]));
+
+    // Apply rotation
+    if (t.has_quaternion)
+    {
+        // quaternion [x, y, z, w] -> glm::quat(w, x, y, z)
+        glm::quat q(t.quaternion[3], t.quaternion[0], t.quaternion[1], t.quaternion[2]);
+        model *= glm::mat4_cast(q);
+    }
+    else
+    {
+        // Euler angles in degrees
+        model = glm::rotate(model, glm::radians(t.euler_degrees[0]), glm::vec3(1, 0, 0));
+        model = glm::rotate(model, glm::radians(t.euler_degrees[1]), glm::vec3(0, 1, 0));
+        model = glm::rotate(model, glm::radians(t.euler_degrees[2]), glm::vec3(0, 0, 1));
+    }
+
+    // Apply scaling
+    model = glm::scale(model, glm::vec3(t.scaling[0], t.scaling[1], t.scaling[2]));
+
+    return model;
 }
 
 const unsigned int SCR_WIDTH = 800;
@@ -122,15 +206,23 @@ int main(int argc, char* argv[])
 {
     if (argc < 2)
     {
-        std::cerr << "Usage: " << argv[0] << " <model_path>\n";
+        std::cerr << "Usage: " << argv[0] << " <model_path_or_scene_dir>\n";
         std::cerr << "Example: " << argv[0] << " backpack/backpack.obj\n";
+        std::cerr << "         " << argv[0] << " fy   (loads fy/scene.json or fy/fy.obj)\n";
         return 1;
     }
 
-    const std::string modelPath = joinPath(getExecutableDirectory(), argv[1]);
-    if (!fileExists(modelPath))
+    const std::string resolvedPath = resolveModelPath(argv[1]);
+
+    // Check if this is a scene.json
+    bool isSceneConfig = (resolvedPath.size() >= 11 &&
+        resolvedPath.substr(resolvedPath.size() - 11) == "scene.json");
+
+    if (!fileExists(resolvedPath))
     {
-        std::cerr << "Model file not found: " << modelPath << std::endl;
+        std::cerr << "Model file not found: " << resolvedPath << std::endl;
+        if (isDirectory(joinPath(getExecutableDirectory(), argv[1])))
+            std::cerr << "Hint: expected scene.json, " << argv[1] << ".obj or fy.obj" << std::endl;
         return 1;
     }
 
@@ -173,7 +265,68 @@ int main(int argc, char* argv[])
 #else
     Shader ourShader("1.model_loading.vs", "1.model_loading.fs");
 #endif
-    Model ourModel(modelPath);
+
+    // Scene mode: load multiple models with transforms
+    struct LoadedModel {
+        std::unique_ptr<Model> model;
+        glm::mat4 transform;
+        std::string name;
+    };
+
+    std::vector<LoadedModel> models;
+
+    if (isSceneConfig)
+    {
+        std::cout << "Loading scene config: " << resolvedPath << std::endl;
+        SceneConfig config = loadSceneConfig(resolvedPath);
+        if (config.models.empty())
+        {
+            std::cerr << "No models in scene config" << std::endl;
+            glfwTerminate();
+            return 1;
+        }
+
+        std::cout << "Scene has " << config.models.size() << " models" << std::endl;
+
+        for (auto& sm : config.models)
+        {
+            std::string fullPath = joinPath(config.base_dir, sm.model_path);
+            if (!fileExists(fullPath))
+            {
+                std::cerr << "  skip " << sm.name << ": " << fullPath << " not found" << std::endl;
+                continue;
+            }
+
+            std::cout << "  loading: " << sm.name << " <- " << sm.model_path << std::endl;
+
+            LoadedModel lm;
+            lm.model = std::make_unique<Model>(fullPath);
+            lm.transform = transformToMat4(sm.transform);
+            lm.name = sm.name;
+            models.push_back(std::move(lm));
+        }
+
+        if (models.empty())
+        {
+            std::cerr << "No models loaded successfully" << std::endl;
+            glfwTerminate();
+            return 1;
+        }
+
+        std::cout << "Loaded " << models.size() << " models" << std::endl;
+
+        // Adjust camera to be further back for large scenes
+        camera.ProcessKeyboard(BACKWARD, 50.0f);
+    }
+    else
+    {
+        // Single model mode (backward compat)
+        LoadedModel lm;
+        lm.model = std::make_unique<Model>(resolvedPath);
+        lm.transform = glm::mat4(1.0f);
+        lm.name = basenameOf(resolvedPath);
+        models.push_back(std::move(lm));
+    }
 
     int frameCount = 0;
     double fpsTimer = glfwGetTime();
@@ -191,23 +344,24 @@ int main(int argc, char* argv[])
 
         ourShader.use();
 
-        glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f);
+        glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 1000.0f);
         glm::mat4 view = camera.GetViewMatrix();
         ourShader.setMat4("projection", projection);
         ourShader.setMat4("view", view);
 
-        glm::mat4 model = glm::mat4(1.0f);
-        model = glm::translate(model, glm::vec3(0.0f, 0.0f, 0.0f));
-        model = glm::scale(model, glm::vec3(1.0f, 1.0f, 1.0f));
-        ourShader.setMat4("model", model);
-        ourModel.Draw(ourShader);
+        for (auto& lm : models)
+        {
+            ourShader.setMat4("model", lm.transform);
+            lm.model->Draw(ourShader);
+        }
 
         frameCount++;
         double now = glfwGetTime();
         if (now - fpsTimer >= 1.0)
         {
-            char title[64];
-            std::snprintf(title, sizeof(title), "Model Loading - FPS: %d", frameCount);
+            char title[128];
+            std::snprintf(title, sizeof(title), "Model Loading - %d models - FPS: %d",
+                          (int)models.size(), frameCount);
             glfwSetWindowTitle(window, title);
             frameCount = 0;
             fpsTimer = now;

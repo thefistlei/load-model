@@ -230,6 +230,13 @@ bool loadKtx2FromFile(const std::string& path, Ktx2Texture& out)
     return parse_ktx2(file_data.data(), file_data.size(), out);
 }
 
+bool loadKtx2FromMemory(const unsigned char* data, size_t size, Ktx2Texture& out)
+{
+    if (!data || size == 0)
+        return false;
+    return parse_ktx2(data, size, out);
+}
+
 bool uploadKtx2ToTexture(unsigned int texture, const Ktx2Texture& ktx)
 {
     if (!ktx.valid || ktx.levels.empty())

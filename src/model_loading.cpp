@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <learnopengl/shader_m.h>
 #include <learnopengl/camera.h>
@@ -88,6 +89,12 @@ std::string basenameOf(const std::string& path)
     return (pos == std::string::npos) ? path : path.substr(pos + 1);
 }
 
+bool endsWith(const std::string& s, const std::string& suffix)
+{
+    return s.size() >= suffix.size() &&
+           s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
 // Resolve model path: if arg is a directory, look for scene.json, then fallback to .obj/.fbx
 std::string resolveModelPath(const std::string& arg)
 {
@@ -119,35 +126,26 @@ std::string resolveModelPath(const std::string& arg)
 // Convert SceneTransform to glm::mat4
 glm::mat4 transformToMat4(const SceneTransform& t)
 {
-    if (t.has_matrix)
-    {
-        // matrix is row-major float[16], glm expects column-major
-        return glm::make_mat4(t.matrix);
-    }
-
+    // Prefer TRS: convert script's flat "matrix" mixes row-major 3x3 with
+    // translation at indices 12..14, which is unreliable in glm::make_mat4.
     glm::mat4 model = glm::mat4(1.0f);
-
-    // Apply translation
     model = glm::translate(model, glm::vec3(t.position[0], t.position[1], t.position[2]));
 
-    // Apply rotation
     if (t.has_quaternion)
     {
-        // quaternion [x, y, z, w] -> glm::quat(w, x, y, z)
-        glm::quat q(t.quaternion[3], t.quaternion[0], t.quaternion[1], t.quaternion[2]);
+        // JSON quaternion is in (w, x, y, z) order per ce4 convention
+        // glm::quat constructor takes (w, x, y, z)
+        glm::quat q(t.quaternion[0], t.quaternion[1], t.quaternion[2], t.quaternion[3]);
         model *= glm::mat4_cast(q);
     }
     else
     {
-        // Euler angles in degrees
         model = glm::rotate(model, glm::radians(t.euler_degrees[0]), glm::vec3(1, 0, 0));
         model = glm::rotate(model, glm::radians(t.euler_degrees[1]), glm::vec3(0, 1, 0));
         model = glm::rotate(model, glm::radians(t.euler_degrees[2]), glm::vec3(0, 0, 1));
     }
 
-    // Apply scaling
     model = glm::scale(model, glm::vec3(t.scaling[0], t.scaling[1], t.scaling[2]));
-
     return model;
 }
 
@@ -158,6 +156,35 @@ Camera camera(glm::vec3(0.0f, 0.0f, 3.0f));
 
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
+
+static void frameCameraToScene(const SceneConfig& config)
+{
+    glm::vec3 bmin(1e9f), bmax(-1e9f);
+    bool any = false;
+    for (const auto& sm : config.models)
+    {
+        glm::vec3 p(sm.transform.position[0], sm.transform.position[1], sm.transform.position[2]);
+        bmin = glm::min(bmin, p);
+        bmax = glm::max(bmax, p);
+        any = true;
+    }
+    if (!any)
+        return;
+
+    glm::vec3 center = 0.5f * (bmin + bmax);
+    float radius = glm::max(glm::length(bmax - bmin) * 0.5f, 10.0f);
+
+    camera.Position = center + glm::vec3(0.0f, radius * 0.6f, radius * 1.8f);
+    camera.Yaw = -90.0f;
+    camera.Pitch = -25.0f;
+    camera.MovementSpeed = glm::max(radius * 0.4f, 10.0f);
+    camera.ProcessMouseMovement(0.0f, 0.0f, false);
+
+    std::cout << "Camera framed at (" << camera.Position.x << ", "
+              << camera.Position.y << ", " << camera.Position.z
+              << ") center=(" << center.x << ", " << center.y << ", " << center.z
+              << ") radius=" << radius << std::endl;
+}
 
 GLFWwindow* createGLFWWindow(int width, int height, const char* title)
 {
@@ -214,9 +241,8 @@ int main(int argc, char* argv[])
 
     const std::string resolvedPath = resolveModelPath(argv[1]);
 
-    // Check if this is a scene.json
-    bool isSceneConfig = (resolvedPath.size() >= 11 &&
-        resolvedPath.substr(resolvedPath.size() - 11) == "scene.json");
+    // Check if this is a scene.json ("scene.json" is 10 chars, not 11)
+    const bool isSceneConfig = endsWith(resolvedPath, "scene.json");
 
     if (!fileExists(resolvedPath))
     {
@@ -303,6 +329,21 @@ int main(int argc, char* argv[])
             lm.model = std::make_unique<Model>(fullPath);
             lm.transform = transformToMat4(sm.transform);
             lm.name = sm.name;
+
+            // FBX usually has no Assimp textures; bind BaseMap from scene.json
+            bool gotTex = false;
+            for (const auto& mat : sm.materials)
+            {
+                auto it = mat.textures.find("BaseMap");
+                if (it == mat.textures.end() || it->second.empty())
+                    continue;
+                lm.model->EnsureDiffuseTexture(it->second, config.base_dir);
+                gotTex = true;
+                break;
+            }
+            if (!gotTex)
+                lm.model->EnsureFallbackDiffuse();
+
             models.push_back(std::move(lm));
         }
 
@@ -314,9 +355,8 @@ int main(int argc, char* argv[])
         }
 
         std::cout << "Loaded " << models.size() << " models" << std::endl;
-
-        // Adjust camera to be further back for large scenes
-        camera.ProcessKeyboard(BACKWARD, 50.0f);
+        frameCameraToScene(config);
+        glDisable(GL_CULL_FACE);
     }
     else
     {
@@ -325,6 +365,7 @@ int main(int argc, char* argv[])
         lm.model = std::make_unique<Model>(resolvedPath);
         lm.transform = glm::mat4(1.0f);
         lm.name = basenameOf(resolvedPath);
+        lm.model->EnsureFallbackDiffuse();
         models.push_back(std::move(lm));
     }
 
@@ -344,7 +385,7 @@ int main(int argc, char* argv[])
 
         ourShader.use();
 
-        glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 1000.0f);
+        glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 5000.0f);
         glm::mat4 view = camera.GetViewMatrix();
         ourShader.setMat4("projection", projection);
         ourShader.setMat4("view", view);

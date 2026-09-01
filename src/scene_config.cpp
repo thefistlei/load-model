@@ -95,6 +95,15 @@ SceneConfig loadSceneConfig(const std::string& json_path) {
         if (mj.contains("transform"))
             loadTransform(mj["transform"], model.transform);
 
+        // scene.json also stores a precomputed matrix at the model root
+        if (mj.contains("matrix") && mj["matrix"].is_array())
+        {
+            auto arr = mj["matrix"];
+            for (int i = 0; i < 16 && i < (int)arr.size(); i++)
+                model.transform.matrix[i] = arr[i].get<float>();
+            model.transform.has_matrix = true;
+        }
+
         if (mj.contains("materials") && mj["materials"].is_array()) {
             for (auto& matj : mj["materials"]) {
                 model.materials.push_back(loadMaterial(matj));

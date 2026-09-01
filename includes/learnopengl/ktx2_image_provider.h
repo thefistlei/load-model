@@ -25,6 +25,7 @@ struct Ktx2Texture
 
 bool isKtx2File(const std::string& path);
 bool loadKtx2FromFile(const std::string& path, Ktx2Texture& out);
+bool loadKtx2FromMemory(const unsigned char* data, size_t size, Ktx2Texture& out);
 bool uploadKtx2ToTexture(unsigned int texture, const Ktx2Texture& ktx);
 
 #endif

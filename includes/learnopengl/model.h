@@ -21,6 +21,8 @@
 #include <map>
 #include <vector>
 #include <functional>
+#include <cstring>
+#include <cstdlib>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -30,6 +32,7 @@
 using namespace std;
 
 unsigned int TextureFromFile(const char *path, const string &directory, bool gamma = false);
+unsigned int TextureFromEmbedded(const aiScene *scene, const char *path);
 
 class Model
 {
@@ -51,6 +54,79 @@ public:
     {
         for(unsigned int i = 0; i < meshes.size(); i++)
             meshes[i].Draw(shader);
+    }
+
+    // Attach a diffuse texture (e.g. BaseMap from scene.json) to every mesh that has none.
+    void EnsureDiffuseTexture(const string& texturePath, const string& searchDir)
+    {
+        if (texturePath.empty())
+            return;
+
+        string rel = texturePath;
+        for (char& c : rel)
+        {
+            if (c == '\\')
+                c = '/';
+        }
+
+        string probePath = searchDir.empty() ? rel : (searchDir + "/" + rel);
+        {
+            std::ifstream probe(probePath.c_str(), std::ios::binary);
+            if (!probe.good())
+            {
+                std::cout << "  BaseMap missing: " << probePath << std::endl;
+                return;
+            }
+        }
+
+        unsigned int id = TextureFromFile(rel.c_str(), searchDir);
+        Texture tex;
+        tex.id = id;
+        tex.type = "texture_diffuse";
+        tex.path = texturePath;
+        textures_loaded.push_back(tex);
+
+        for (Mesh& mesh : meshes)
+        {
+            bool hasDiffuse = false;
+            for (const Texture& t : mesh.textures)
+            {
+                if (t.type == "texture_diffuse")
+                {
+                    hasDiffuse = true;
+                    break;
+                }
+            }
+            if (!hasDiffuse)
+                mesh.textures.push_back(tex);
+        }
+        std::cout << "  BaseMap bound: " << texturePath << std::endl;
+    }
+
+    // 1x1 white fallback so unbound samplers are not black
+    void EnsureFallbackDiffuse()
+    {
+        static unsigned int whiteId = 0;
+        if (whiteId == 0)
+        {
+            unsigned char pixel[4] = { 220, 220, 220, 255 };
+            glGenTextures(1, &whiteId);
+            glBindTexture(GL_TEXTURE_2D, whiteId);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        }
+
+        Texture tex;
+        tex.id = whiteId;
+        tex.type = "texture_diffuse";
+        tex.path = "__white__";
+
+        for (Mesh& mesh : meshes)
+        {
+            if (mesh.textures.empty())
+                mesh.textures.push_back(tex);
+        }
     }
 
 private:
@@ -168,26 +244,26 @@ private:
         // normal: texture_normalN
 
         // 1. diffuse / baseColor (OBJ uses DIFFUSE; glTF 2 PBR uses BASE_COLOR)
-        vector<Texture> diffuseMaps = loadMaterialTextures(material, aiTextureType_DIFFUSE, "texture_diffuse");
+        vector<Texture> diffuseMaps = loadMaterialTextures(scene, material, aiTextureType_DIFFUSE, "texture_diffuse");
         textures.insert(textures.end(), diffuseMaps.begin(), diffuseMaps.end());
-        vector<Texture> baseColorMaps = loadMaterialTextures(material, aiTextureType_BASE_COLOR, "texture_diffuse");
+        vector<Texture> baseColorMaps = loadMaterialTextures(scene, material, aiTextureType_BASE_COLOR, "texture_diffuse");
         textures.insert(textures.end(), baseColorMaps.begin(), baseColorMaps.end());
         // 2. specular maps
-        vector<Texture> specularMaps = loadMaterialTextures(material, aiTextureType_SPECULAR, "texture_specular");
+        vector<Texture> specularMaps = loadMaterialTextures(scene, material, aiTextureType_SPECULAR, "texture_specular");
         textures.insert(textures.end(), specularMaps.begin(), specularMaps.end());
         // 3. normal maps (OBJ bump often lands in HEIGHT; glTF uses NORMALS / NORMAL_CAMERA)
-        std::vector<Texture> normalMaps = loadMaterialTextures(material, aiTextureType_HEIGHT, "texture_normal");
+        std::vector<Texture> normalMaps = loadMaterialTextures(scene, material, aiTextureType_HEIGHT, "texture_normal");
         textures.insert(textures.end(), normalMaps.begin(), normalMaps.end());
-        std::vector<Texture> normalsMaps = loadMaterialTextures(material, aiTextureType_NORMALS, "texture_normal");
+        std::vector<Texture> normalsMaps = loadMaterialTextures(scene, material, aiTextureType_NORMALS, "texture_normal");
         textures.insert(textures.end(), normalsMaps.begin(), normalsMaps.end());
-        std::vector<Texture> normalCameraMaps = loadMaterialTextures(material, aiTextureType_NORMAL_CAMERA, "texture_normal");
+        std::vector<Texture> normalCameraMaps = loadMaterialTextures(scene, material, aiTextureType_NORMAL_CAMERA, "texture_normal");
         textures.insert(textures.end(), normalCameraMaps.begin(), normalCameraMaps.end());
         // 4. height / AO
-        std::vector<Texture> heightMaps = loadMaterialTextures(material, aiTextureType_AMBIENT, "texture_height");
+        std::vector<Texture> heightMaps = loadMaterialTextures(scene, material, aiTextureType_AMBIENT, "texture_height");
         textures.insert(textures.end(), heightMaps.begin(), heightMaps.end());
-        std::vector<Texture> aoMaps = loadMaterialTextures(material, aiTextureType_AMBIENT_OCCLUSION, "texture_height");
+        std::vector<Texture> aoMaps = loadMaterialTextures(scene, material, aiTextureType_AMBIENT_OCCLUSION, "texture_height");
         textures.insert(textures.end(), aoMaps.begin(), aoMaps.end());
-        std::vector<Texture> lightMaps = loadMaterialTextures(material, aiTextureType_LIGHTMAP, "texture_height");
+        std::vector<Texture> lightMaps = loadMaterialTextures(scene, material, aiTextureType_LIGHTMAP, "texture_height");
         textures.insert(textures.end(), lightMaps.begin(), lightMaps.end());
 
         // return a mesh object created from the extracted mesh data
@@ -196,7 +272,7 @@ private:
 
     // checks all material textures of a given type and loads the textures if they're not loaded yet.
     // the required info is returned as a Texture struct.
-    vector<Texture> loadMaterialTextures(aiMaterial *mat, aiTextureType type, string typeName)
+    vector<Texture> loadMaterialTextures(const aiScene *scene, aiMaterial *mat, aiTextureType type, string typeName)
     {
         vector<Texture> textures;
         for(unsigned int i = 0; i < mat->GetTextureCount(type); i++)
@@ -217,7 +293,11 @@ private:
             if(!skip)
             {   // if texture hasn't been loaded already, load it
                 Texture texture;
-                texture.id = TextureFromFile(str.C_Str(), this->directory);
+                const char* texPath = str.C_Str();
+                if (texPath && texPath[0] == '*')
+                    texture.id = TextureFromEmbedded(scene, texPath);
+                else
+                    texture.id = TextureFromFile(texPath, this->directory);
                 texture.type = typeName;
                 texture.path = str.C_Str();
                 textures.push_back(texture);
@@ -228,6 +308,82 @@ private:
     }
 };
 
+
+unsigned int TextureFromEmbedded(const aiScene *scene, const char *path)
+{
+    unsigned int textureID = 0;
+    glGenTextures(1, &textureID);
+
+    if (!scene || !path || path[0] != '*')
+    {
+        std::cout << "TextureFromEmbedded: invalid args path=" << (path ? path : "(null)") << std::endl;
+        return textureID;
+    }
+
+    const int index = std::atoi(path + 1);
+    if (index < 0 || static_cast<unsigned>(index) >= scene->mNumTextures || !scene->mTextures[index])
+    {
+        std::cout << "TextureFromEmbedded: missing embedded texture " << path << std::endl;
+        return textureID;
+    }
+
+    const aiTexture *tex = scene->mTextures[index];
+    // Compressed blob (PNG/JPG/KTX2/...): mHeight == 0, mWidth == byte length
+    if (tex->mHeight == 0 && tex->pcData && tex->mWidth > 0)
+    {
+        const auto *bytes = reinterpret_cast<const unsigned char *>(tex->pcData);
+        const size_t size = static_cast<size_t>(tex->mWidth);
+        const std::string hint = tex->achFormatHint ? tex->achFormatHint : "";
+
+        const bool looksKtx2 =
+            hint.find("ktx2") != std::string::npos ||
+            (size >= 12 && std::memcmp(bytes, "\xABKTX 20\xBB\r\n\x1A\n", 12) == 0);
+
+        if (looksKtx2)
+        {
+            Ktx2Texture ktx;
+            if (loadKtx2FromMemory(bytes, size, ktx) && uploadKtx2ToTexture(textureID, ktx))
+            {
+                std::cout << "Texture loaded embedded KTX2: " << path << std::endl;
+                return textureID;
+            }
+            std::cout << "Texture failed embedded KTX2: " << path << " hint=" << hint << std::endl;
+            return textureID;
+        }
+
+        int width = 0, height = 0, nrComponents = 0;
+        unsigned char *data = stbi_load_from_memory(bytes, static_cast<int>(size), &width, &height, &nrComponents, 0);
+        if (data)
+        {
+            GLenum format = GL_RGB;
+            GLenum internalFormat = GL_RGB;
+            if (nrComponents == 1) { format = GL_RED; internalFormat = GL_RED; }
+            else if (nrComponents == 4) { format = GL_RGBA; internalFormat = GL_RGBA; }
+#if defined(SS_GL_USE_ES) && SS_GL_USE_ES
+            if (nrComponents == 1) internalFormat = GL_R8;
+            else if (nrComponents == 3) internalFormat = GL_RGB8;
+            else if (nrComponents == 4) internalFormat = GL_RGBA8;
+#endif
+            glBindTexture(GL_TEXTURE_2D, textureID);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+            glTexImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(internalFormat), width, height, 0, format, GL_UNSIGNED_BYTE, data);
+            glGenerateMipmap(GL_TEXTURE_2D);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            stbi_image_free(data);
+            std::cout << "Texture loaded embedded raster: " << path << " hint=" << hint << std::endl;
+            return textureID;
+        }
+        std::cout << "Texture failed embedded raster: " << path
+                  << " reason: " << (stbi_failure_reason() ? stbi_failure_reason() : "unknown") << std::endl;
+        return textureID;
+    }
+
+    std::cout << "TextureFromEmbedded: unsupported uncompressed layout for " << path << std::endl;
+    return textureID;
+}
 
 unsigned int TextureFromFile(const char *path, const string &directory, bool gamma)
 {

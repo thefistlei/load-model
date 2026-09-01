@@ -203,7 +203,12 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/resources/objects/backpack
             $<TARGET_FILE_DIR:model_loading>/backpack)
-    if(EXISTS "${CMAKE_SOURCE_DIR}/resources/objects/fy/fy.obj")
+    add_custom_command(TARGET model_loading PRE_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/config.json
+            $<TARGET_FILE_DIR:model_loading>/config.json)
+    if(EXISTS "${CMAKE_SOURCE_DIR}/resources/objects/fy/fy.obj"
+       OR EXISTS "${CMAKE_SOURCE_DIR}/resources/objects/fy/scene.json")
         add_custom_command(TARGET model_loading PRE_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 ${CMAKE_SOURCE_DIR}/resources/objects/fy
@@ -222,10 +227,13 @@ else()
             ${SHADER_VS} $<TARGET_FILE_DIR:model_loading>/1.model_loading.vs
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${SHADER_FS} $<TARGET_FILE_DIR:model_loading>/1.model_loading.fs
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/config.json $<TARGET_FILE_DIR:model_loading>/config.json
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/resources/objects/backpack
             $<TARGET_FILE_DIR:model_loading>/backpack)
-    if(EXISTS "${CMAKE_SOURCE_DIR}/resources/objects/fy/fy.obj")
+    if(EXISTS "${CMAKE_SOURCE_DIR}/resources/objects/fy/fy.obj"
+       OR EXISTS "${CMAKE_SOURCE_DIR}/resources/objects/fy/scene.json")
         add_custom_command(TARGET model_loading POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 ${CMAKE_SOURCE_DIR}/resources/objects/fy

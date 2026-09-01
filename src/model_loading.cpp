@@ -11,6 +11,7 @@
 #include <learnopengl/camera.h>
 #include <learnopengl/model.h>
 #include <learnopengl/scene_config.h>
+#include <nlohmann_json.hpp>
 
 #include <iostream>
 #include <cstdio>
@@ -18,6 +19,7 @@
 #include <fstream>
 #include <memory>
 #include <vector>
+#include <sstream>
 
 #ifndef SS_GL_USE_ES
 #define SS_GL_USE_ES 0
@@ -93,6 +95,80 @@ bool endsWith(const std::string& s, const std::string& suffix)
 {
     return s.size() >= suffix.size() &&
            s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+// Read model path from config.json next to the executable.
+// Supported keys: "model" or "model_path". Lines starting with # in .txt are ignored if using plain text.
+std::string loadModelArgFromConfig(const std::string& configPath)
+{
+    std::ifstream file(configPath);
+    if (!file.is_open())
+        return "";
+
+    // Prefer JSON
+    if (endsWith(configPath, ".json"))
+    {
+        try
+        {
+            nlohmann::json root;
+            file >> root;
+            if (root.contains("model") && root["model"].is_string())
+                return root["model"].get<std::string>();
+            if (root.contains("model_path") && root["model_path"].is_string())
+                return root["model_path"].get<std::string>();
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "Failed to parse config " << configPath << ": " << e.what() << std::endl;
+        }
+        return "";
+    }
+
+    // Plain text: first non-empty, non-# line
+    std::string line;
+    while (std::getline(file, line))
+    {
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t'))
+            line.pop_back();
+        size_t start = 0;
+        while (start < line.size() && (line[start] == ' ' || line[start] == '\t'))
+            ++start;
+        if (start > 0)
+            line = line.substr(start);
+        if (line.empty() || line[0] == '#')
+            continue;
+        return line;
+    }
+    return "";
+}
+
+std::string resolveLaunchModelArg(int argc, char* argv[])
+{
+    // CLI still overrides config when provided
+    if (argc >= 2 && argv[1] && argv[1][0] != '\0')
+        return argv[1];
+
+    const std::string exeDir = getExecutableDirectory();
+    const std::string candidates[] = {
+        joinPath(exeDir, "config.json"),
+        joinPath(exeDir, "model_loading.json"),
+        "config.json",
+    };
+
+    for (const auto& path : candidates)
+    {
+        if (!fileExists(path))
+            continue;
+        std::string model = loadModelArgFromConfig(path);
+        if (!model.empty())
+        {
+            std::cout << "Config: " << path << " -> model=\"" << model << "\"" << std::endl;
+            return model;
+        }
+        std::cerr << "Config " << path << " has no \"model\" / \"model_path\"" << std::endl;
+    }
+
+    return "";
 }
 
 // Resolve model path: if arg is a directory, look for scene.json, then fallback to .obj/.fbx
@@ -231,15 +307,19 @@ GLFWwindow* createGLFWWindow(int width, int height, const char* title)
 
 int main(int argc, char* argv[])
 {
-    if (argc < 2)
+    const std::string modelArg = resolveLaunchModelArg(argc, argv);
+    if (modelArg.empty())
     {
-        std::cerr << "Usage: " << argv[0] << " <model_path_or_scene_dir>\n";
-        std::cerr << "Example: " << argv[0] << " backpack/backpack.obj\n";
-        std::cerr << "         " << argv[0] << " fy   (loads fy/scene.json or fy/fy.obj)\n";
+        std::cerr << "Usage:\n";
+        std::cerr << "  1) Put config.json next to the exe:\n";
+        std::cerr << "       { \"model\": \"fy\" }\n";
+        std::cerr << "     then run: " << argv[0] << "\n";
+        std::cerr << "  2) Or pass CLI (overrides config): " << argv[0] << " <model_path>\n";
+        std::cerr << "Example model values: fy , backpack/backpack.obj\n";
         return 1;
     }
 
-    const std::string resolvedPath = resolveModelPath(argv[1]);
+    const std::string resolvedPath = resolveModelPath(modelArg);
 
     // Check if this is a scene.json ("scene.json" is 10 chars, not 11)
     const bool isSceneConfig = endsWith(resolvedPath, "scene.json");
@@ -247,8 +327,8 @@ int main(int argc, char* argv[])
     if (!fileExists(resolvedPath))
     {
         std::cerr << "Model file not found: " << resolvedPath << std::endl;
-        if (isDirectory(joinPath(getExecutableDirectory(), argv[1])))
-            std::cerr << "Hint: expected scene.json, " << argv[1] << ".obj or fy.obj" << std::endl;
+        if (isDirectory(joinPath(getExecutableDirectory(), modelArg)))
+            std::cerr << "Hint: expected scene.json, " << modelArg << ".obj or fy.obj" << std::endl;
         return 1;
     }
 

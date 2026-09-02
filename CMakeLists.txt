@@ -45,6 +45,8 @@ endif()
 
 add_executable(model_loading
     src/model_loading.cpp
+    src/app_engine.cpp
+    src/platform_desktop.cpp
     src/scene_config.cpp
     src/ktx2_image_provider.cpp
 )

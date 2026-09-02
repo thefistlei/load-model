@@ -1,3 +1,14 @@
 *.fbx
 bin/
 build/
+.gradle/
+.idea/
+local.properties
+app/build/
+app/.cxx/
+*.apk
+*.aab
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/

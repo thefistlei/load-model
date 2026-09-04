@@ -102,7 +102,10 @@
 #elif defined (__SYMBIAN32__)
 #   define KHRONOS_APICALL IMPORT_C
 #elif defined(__ANDROID__)
-#   include <sys/cdefs.h>
+/* NDK r23+ removed __NDK_FPABI__; keep empty for older toolchains that still define it. */
+#   ifndef __NDK_FPABI__
+#       define __NDK_FPABI__
+#   endif
 #   define KHRONOS_APICALL __attribute__((visibility("default"))) __NDK_FPABI__
 #else
 #   define KHRONOS_APICALL

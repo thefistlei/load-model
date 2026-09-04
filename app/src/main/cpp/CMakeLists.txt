@@ -6,17 +6,22 @@ set(PROJECT_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../../..)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Keep Assimp static so the APK only needs libmodel_loading.so
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_INJECT_DEBUG_POSTFIX OFF CACHE BOOL "" FORCE)
+
 include(FetchContent)
 FetchContent_Declare(
     assimp
     GIT_REPOSITORY https://github.com/assimp/assimp.git
     GIT_TAG v5.4.3
 )
-set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
-set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
-set(ASSIMP_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
-set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(assimp)
 
 add_library(app-glue STATIC
@@ -25,6 +30,8 @@ add_library(app-glue STATIC
 target_include_directories(app-glue PUBLIC
     ${ANDROID_NDK}/sources/android/native_app_glue
 )
+# Glue provides ANativeActivity_onCreate; keep it even if "unused"
+target_compile_options(app-glue PRIVATE -fPIC)
 
 add_library(model_loading SHARED
     android_main.cpp
@@ -36,9 +43,13 @@ add_library(model_loading SHARED
     ${PROJECT_ROOT}/src/glad_es.c
 )
 
+set_target_properties(model_loading PROPERTIES
+    OUTPUT_NAME "model_loading"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}"
+)
+
 target_compile_definitions(model_loading PRIVATE
     SS_GL_USE_ES=1
-    ANDROID=1
 )
 
 target_include_directories(model_loading BEFORE PRIVATE
@@ -61,4 +72,9 @@ target_link_libraries(model_loading PRIVATE
     ${android-lib}
     ${EGL-lib}
     ${GLESv3-lib}
+)
+
+# NativeActivity looks up ANativeActivity_onCreate in this .so
+target_link_options(model_loading PRIVATE
+    -uANativeActivity_onCreate
 )
